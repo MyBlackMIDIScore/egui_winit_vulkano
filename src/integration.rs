@@ -6,6 +6,8 @@
 // at your option. All files in the project carrying such
 // notice may not be copied, modified, or distributed except
 // according to those terms.
+use egui_winit::winit;
+
 use std::sync::Arc;
 
 use egui::{ClippedPrimitive, TexturesDelta};
@@ -69,7 +71,6 @@ impl GuiConfig {
 }
 
 pub struct Gui {
-    pub egui_ctx: egui::Context,
     pub egui_winit: egui_winit::State,
     renderer: Renderer,
     surface: Arc<Surface>,
@@ -124,25 +125,20 @@ impl Gui {
             renderer.queue().device().physical_device().properties().max_image_dimension2_d
                 as usize;
         let egui_ctx: egui::Context = Default::default();
+        let viewport_id = egui_ctx.viewport_id();
         let egui_winit = egui_winit::State::new(
-            egui_ctx.viewport_id(),
+            egui_ctx,
+            viewport_id,
             event_loop,
             Some(surface_window(&surface).scale_factor() as f32),
             Some(max_texture_side),
         );
-        Gui {
-            egui_ctx,
-            egui_winit,
-            renderer,
-            surface,
-            shapes: vec![],
-            textures_delta: Default::default(),
-        }
+        Gui { egui_winit, renderer, surface, shapes: vec![], textures_delta: Default::default() }
     }
 
     /// Returns the pixels per point of the window of this gui.
     fn pixels_per_point(&self) -> f32 {
-        egui_winit::pixels_per_point(&self.egui_ctx, surface_window(&self.surface))
+        egui_winit::pixels_per_point(self.egui_winit.egui_ctx(), surface_window(&self.surface))
     }
 
     /// Returns a set of resources used to construct the render pipeline. These can be reused
@@ -158,14 +154,14 @@ impl Gui {
     /// and only when this returns `false` pass on the events to your game.
     ///
     /// Note that egui uses `tab` to move focus between elements, so this will always return `true` for tabs.
-    pub fn update(&mut self, winit_event: &winit::event::WindowEvent<'_>) -> bool {
-        self.egui_winit.on_window_event(&self.egui_ctx, winit_event).consumed
+    pub fn update(&mut self, winit_event: &winit::event::WindowEvent) -> bool {
+        self.egui_winit.on_window_event(surface_window(&self.surface), winit_event).consumed
     }
 
     /// Begins Egui frame & determines what will be drawn later. This must be called before draw, and after `update` (winit event).
     pub fn immediate_ui(&mut self, layout_function: impl FnOnce(&mut Self)) {
         let raw_input = self.egui_winit.take_egui_input(surface_window(&self.surface));
-        self.egui_ctx.begin_frame(raw_input);
+        self.egui_winit.egui_ctx().begin_frame(raw_input);
         // Render Egui
         layout_function(self);
     }
@@ -174,7 +170,7 @@ impl Gui {
     /// (Finish by drawing)
     pub fn begin_frame(&mut self) {
         let raw_input = self.egui_winit.take_egui_input(surface_window(&self.surface));
-        self.egui_ctx.begin_frame(raw_input);
+        self.egui_winit.egui_ctx().begin_frame(raw_input);
     }
 
     /// Renders ui on `final_image` & Updates cursor icon
@@ -235,7 +231,7 @@ impl Gui {
         self.end_frame();
         let shapes = std::mem::take(&mut self.shapes);
         let textures_delta = std::mem::take(&mut self.textures_delta);
-        let clipped_meshes = self.egui_ctx.tessellate(shapes, self.pixels_per_point());
+        let clipped_meshes = self.egui_winit.egui_ctx().tessellate(shapes, self.pixels_per_point());
         (clipped_meshes, textures_delta)
     }
 
@@ -246,13 +242,9 @@ impl Gui {
             shapes,
             pixels_per_point: _,
             viewport_output: _,
-        } = self.egui_ctx.end_frame();
+        } = self.egui_winit.egui_ctx().end_frame();
 
-        self.egui_winit.handle_platform_output(
-            surface_window(&self.surface),
-            &self.egui_ctx,
-            platform_output,
-        );
+        self.egui_winit.handle_platform_output(surface_window(&self.surface), platform_output);
         self.shapes = shapes;
         self.textures_delta = textures_delta;
     }
@@ -311,7 +303,7 @@ impl Gui {
 
     /// Access egui's context (which can be used to e.g. set fonts, visuals etc)
     pub fn context(&self) -> egui::Context {
-        self.egui_ctx.clone()
+        self.egui_winit.egui_ctx().clone()
     }
 }
 
